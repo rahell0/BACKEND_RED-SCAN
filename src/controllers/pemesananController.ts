@@ -1,13 +1,23 @@
+
 import { Request, Response } from 'express';
 import db from '../config/db';
 
 // 1. Ambil Semua Data Pemesanan
 export const getPemesanan = async (req: Request, res: Response) => {
   try {
-    const [rows] = await db.query('SELECT * FROM pemesanan ORDER BY id DESC');
-    res.status(200).json({ success: true, data: rows });
+    const [rows] = await db.query(
+      'SELECT * FROM pemesanan ORDER BY id DESC'
+    );
+
+    res.status(200).json({
+      success: true,
+      data: rows,
+    });
   } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
@@ -18,7 +28,9 @@ export const addPemesanan = async (req: Request, res: Response) => {
 
   try {
     const [result]: any = await db.query(
-      'INSERT INTO pemesanan (kode_transaksi, total_harga, metode_pembayaran, status) VALUES (?, ?, ?, ?)',
+      `INSERT INTO pemesanan
+      (kode_transaksi, total_harga, metode_pembayaran, status)
+      VALUES (?, ?, ?, ?)`,
       [kode_transaksi, total_harga, metode_pembayaran, 'selesai']
     );
 
@@ -29,10 +41,62 @@ export const addPemesanan = async (req: Request, res: Response) => {
         id: result.insertId,
         kode_transaksi,
         total_harga,
-        metode_pembayaran
-      }
+        metode_pembayaran,
+      },
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// 3. Update Status Pemesanan
+
+export const updateStatusPemesanan = async (
+  req: Request,
+  res: Response
+) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  const allowedStatus = [
+    'antre',
+    'menunggu',
+    'pending',
+    'diproses',
+    'selesai',
+  ];
+
+  if (!status || !allowedStatus.includes(String(status).toLowerCase())) {
+    return res.status(400).json({
+      success: false,
+      message: 'Status pesanan tidak valid',
+    });
+  }
+
+  try {
+    const [result]: any = await db.query(
+      'UPDATE pemesanan SET status = ? WHERE id = ?',
+      [String(status).toLowerCase(), id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Pesanan tidak ditemukan',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Status pesanan berhasil diperbarui',
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };

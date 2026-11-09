@@ -1,91 +1,146 @@
-import { Request, Response } from 'express';
-import db from '../config/db';
+import { Request, Response, NextFunction } from 'express';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 
-// REGISTER USER DENGAN VALIDASI
-export const register = async (req: Request, res: Response) => {
-  const { name, email, username, password } = req.body;
+import {
+  findUserByEmail,
+  updateUserPassword
+} from '../models/authModel';
 
-  // 1. Validasi Input Kosong
-  if (!name || !email || !password) {
-    return res.status(400).json({
-      success: false,
-      message: 'Nama, email, dan password wajib diisi!'
-    });
-  }
-
-  // 2. Validasi Format Email
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) {
-    return res.status(400).json({
-      success: false,
-      message: 'Format email tidak valid!'
-    });
-  }
-
-  // 3. Validasi Panjang Password (Min. 6 Karakter)
-  if (password.length < 6) {
-    return res.status(400).json({
-      success: false,
-      message: 'Password minimal terdiri dari 6 karakter!'
-    });
-  }
-
-  try {
-    // 4. Validasi Email Ganda
-    const [existingUser]: any = await db.query('SELECT id FROM users WHERE email = ?', [email]);
-    if (existingUser.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email sudah terdaftar!'
-      });
-    }
-
-    // Simpan ke Database MySQL (tabel users)
-    await db.query(
-      'INSERT INTO users (name, email, username, password) VALUES (?, ?, ?, ?)',
-      [name.trim(), email.trim(), username ? username.trim() : email.split('@')[0], password]
-    );
-
-    res.status(201).json({ 
-      success: true, 
-      message: 'Registrasi berhasil!' 
-    });
-  } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+// REGISTRASI PUBLIK DINONAKTIFKAN
+// Akun admin hanya boleh dibuat melalui proses tepercaya.
+export const register = async (
+  _req: Request,
+  res: Response
+): Promise<void> => {
+  res.status(403).json({
+    success: false,
+    message: 'Registrasi publik dinonaktifkan. Hubungi administrator.'
+  });
 };
 
-// LOGIN USER
-export const login = async (req: Request, res: Response) => {
+// LOGIN ADMIN
+export const login = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   const { email, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({
+  // 1. Validasi input wajib
+  if (
+    typeof email !== 'string' ||
+    typeof password !== 'string' ||
+    !email.trim() ||
+    !password
+  ) {
+    res.status(400).json({
       success: false,
-      message: 'Email dan password tidak boleh kosong!'
+      message: 'Email dan password wajib diisi.'
     });
+    return;
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+
+  // 2. Validasi format email Gmail
+  const gmailPattern = /^[a-zA-Z0-9._%+-]+@gmail\.com$/;
+
+  if (!gmailPattern.test(cleanEmail)) {
+    res.status(400).json({
+      success: false,
+      message: 'Email harus menggunakan format @gmail.com.'
+    });
+    return;
   }
 
   try {
-    // Sesuaikan SELECT menggunakan 'name' (bukan 'nama')
-    const [rows]: any = await db.query(
-      'SELECT id, name, email FROM users WHERE email = ? AND password = ?',
-      [email.trim(), password]
-    );
+    // 3. Cari akun berdasarkan email
+    const user = await findUserByEmail(cleanEmail);
 
-    if (rows.length === 0) {
-      return res.status(401).json({
+    if (!user) {
+      res.status(401).json({
         success: false,
-        message: 'Email atau password salah!'
+        message: 'Email atau password salah.'
       });
+      return;
     }
 
+    // 4. Pastikan akun memiliki role admin
+    if (user.role !== 'admin') {
+      res.status(403).json({
+        success: false,
+        message: 'Akses ditolak. Akun ini bukan admin.'
+      });
+      return;
+    }
+
+    // 5. Periksa password
+    const storedPassword = user.password;
+
+    // Mengenali hash bcrypt
+    const isBcryptHash = /^\$2[aby]\$\d{2}\$/.test(storedPassword);
+
+    let passwordMatches = false;
+
+    if (isBcryptHash) {
+      // Password tersimpan dalam bentuk hash bcrypt
+      passwordMatches = await bcrypt.compare(
+        password,
+        storedPassword
+      );
+    } else {
+      // Kompatibilitas sementara untuk akun lama
+      // yang password-nya masih tersimpan sebagai teks biasa.
+      passwordMatches = password === storedPassword;
+
+      if (passwordMatches) {
+        const newHash = await bcrypt.hash(password, 12);
+        await updateUserPassword(user.id, newHash);
+      }
+    }
+
+    if (!passwordMatches) {
+      res.status(401).json({
+        success: false,
+        message: 'Email atau password salah.'
+      });
+      return;
+    }
+
+    // 6. Pastikan secret JWT tersedia
+    const jwtSecret = process.env.JWT_SECRET;
+
+    if (!jwtSecret) {
+      throw new Error('JWT_SECRET belum diatur pada file .env');
+    }
+
+    // 7. Buat JWT Token
+    const token = jwt.sign(
+      {
+        id: user.id,
+        email: user.email,
+        role: user.role
+      },
+      jwtSecret,
+      {
+        expiresIn: '8h'
+      }
+    );
+
+    // 8. Kirim respons login
     res.status(200).json({
       success: true,
-      message: 'Login berhasil',
-      user: rows[0]
+      message: 'Login admin berhasil.',
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
     });
-  } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
+  } catch (error) {
+    next(error);
   }
 };

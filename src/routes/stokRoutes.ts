@@ -1,11 +1,34 @@
+
 import { Router } from 'express';
-import { getStok, addStok, updateStok, deleteStok } from '../controllers/stokController';
+
+import {
+  getStok,
+  addStok,
+  updateStok,
+  updateJumlahStok,
+  getRiwayatStok,
+} from '../controllers/stokController';
+
+import { verifyAdmin } from '../middlewares/authMiddleware';
 
 const router = Router();
 
+// Semua endpoint stok hanya bisa diakses admin
+router.use(verifyAdmin);
+
+// Mengambil semua bahan
 router.get('/', getStok);
+
+// Mengambil riwayat stok
+router.get('/riwayat', getRiwayatStok);
+
+// Menambahkan bahan
 router.post('/', addStok);
+
+// Mengedit informasi bahan
 router.put('/:id', updateStok);
-router.delete('/:id', deleteStok);
+
+// Menambah atau mengurangi stok
+router.patch('/:id/jumlah', updateJumlahStok);
 
 export default router;
