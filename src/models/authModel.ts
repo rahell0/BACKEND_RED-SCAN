@@ -1,3 +1,4 @@
+
 import db from '../config/db';
 
 export interface User {
@@ -9,6 +10,7 @@ export interface User {
   role: string;
 }
 
+// MENCARI USER BERDASARKAN EMAIL
 export const findUserByEmail = async (
   email: string
 ): Promise<User | null> => {
@@ -23,6 +25,7 @@ export const findUserByEmail = async (
   return rows.length > 0 ? rows[0] as User : null;
 };
 
+// MEMBUAT USER
 export const createUser = async (
   name: string,
   email: string,
@@ -36,6 +39,7 @@ export const createUser = async (
   );
 };
 
+// MEMPERBARUI PASSWORD
 export const updateUserPassword = async (
   userId: number,
   hashedPassword: string
@@ -43,5 +47,50 @@ export const updateUserPassword = async (
   await db.query(
     'UPDATE users SET password = ? WHERE id = ?',
     [hashedPassword, userId]
+  );
+};
+
+// MENGAMBIL DATA USER BERDASARKAN ID
+export const findUserById = async (
+  userId: number
+): Promise<Omit<User, 'password'> | null> => {
+  const [rows]: any = await db.query(
+    `SELECT id, name, email, username, role
+     FROM users
+     WHERE id = ?
+     LIMIT 1`,
+    [userId]
+  );
+
+  return rows.length > 0 ? rows[0] : null;
+};
+
+// MEMERIKSA EMAIL YANG DIGUNAKAN AKUN LAIN
+export const isEmailUsedByAnotherUser = async (
+  email: string,
+  userId: number
+): Promise<boolean> => {
+  const [rows]: any = await db.query(
+    `SELECT id
+     FROM users
+     WHERE email = ? AND id != ?
+     LIMIT 1`,
+    [email, userId]
+  );
+
+  return rows.length > 0;
+};
+
+// MEMPERBARUI NAMA DAN EMAIL PROFIL
+export const updateUserProfile = async (
+  userId: number,
+  name: string,
+  email: string
+): Promise<void> => {
+  await db.query(
+    `UPDATE users
+     SET name = ?, email = ?
+     WHERE id = ?`,
+    [name, email, userId]
   );
 };

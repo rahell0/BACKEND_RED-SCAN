@@ -7,13 +7,14 @@ import {
   updateStok,
   updateJumlahStok,
   getRiwayatStok,
+  deleteStok,
 } from '../controllers/stokController';
 
 import { verifyAdmin } from '../middlewares/authMiddleware';
 
 const router = Router();
 
-// Semua endpoint stok hanya bisa diakses admin
+// Semua endpoint stok hanya bisa diakses admin.
 router.use(verifyAdmin);
 
 // Mengambil semua bahan
@@ -28,7 +29,10 @@ router.post('/', addStok);
 // Mengedit informasi bahan
 router.put('/:id', updateStok);
 
-// Menambah atau mengurangi stok
+// Mengubah jumlah stok
 router.patch('/:id/jumlah', updateJumlahStok);
+
+// Menghapus bahan
+router.delete('/:id', deleteStok);
 
 export default router;

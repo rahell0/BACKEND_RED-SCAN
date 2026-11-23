@@ -7,29 +7,21 @@ export const getLaporanOmzet = async (
   res: Response
 ): Promise<void> => {
   try {
-        const [debugRows]: any = await db.query(`
-      SELECT
-        DATABASE() AS databaseAktif,
-        @@port AS portMySQL,
-        COUNT(*) AS jumlahTransaksi,
-        SUM(CASE WHEN status = 'selesai' THEN 1 ELSE 0 END) AS transaksiSelesai
-      FROM pemesanan
-    `);
-
-    console.log('DEBUG DATABASE OMZET:', debugRows);
-    // Mengambil filter tanggal dari frontend
     const filterRange = String(req.query.range || 'hari_ini');
 
-    // Menentukan filter tanggal
+    // Filter tanggal berdasarkan pilihan frontend.
+    // Semua kondisi di bawah adalah query tetap, bukan input SQL bebas.
     let filterTanggal = '';
 
-        switch (filterRange) {
+    switch (filterRange) {
       case 'semua':
         filterTanggal = '1=1';
         break;
 
       case 'kemarin':
-        filterTanggal = 'DATE(created_at) = CURDATE() - INTERVAL 1 DAY';
+        filterTanggal = `
+          DATE(created_at) = CURDATE() - INTERVAL 1 DAY
+        `;
         break;
 
       case 'minggu_ini':
@@ -51,7 +43,7 @@ export const getLaporanOmzet = async (
         break;
     }
 
-    // Mengambil laporan omzet dari transaksi yang sudah selesai
+    // Mengambil data transaksi yang sudah selesai.
     const [rows]: any = await db.query(`
       SELECT
         COUNT(*) AS totalTransaksi,
@@ -60,7 +52,7 @@ export const getLaporanOmzet = async (
 
         COALESCE(SUM(
           CASE
-            WHEN LOWER(metode_pembayaran) = 'qris'
+            WHEN LOWER(COALESCE(metode_pembayaran, '')) LIKE '%qris%'
             THEN total_harga
             ELSE 0
           END
@@ -68,31 +60,55 @@ export const getLaporanOmzet = async (
 
         COALESCE(SUM(
           CASE
-            WHEN LOWER(metode_pembayaran) IN ('tunai', 'cash')
+            WHEN LOWER(COALESCE(metode_pembayaran, '')) LIKE '%tunai%'
+              OR LOWER(COALESCE(metode_pembayaran, '')) LIKE '%cash%'
             THEN total_harga
             ELSE 0
           END
-        ), 0) AS tunaiOmzet
+        ), 0) AS tunaiOmzet,
+
+        COUNT(
+          CASE
+            WHEN LOWER(COALESCE(metode_pembayaran, '')) LIKE '%qris%'
+            THEN 1
+          END
+        ) AS qrisTransaksi,
+
+        COUNT(
+          CASE
+            WHEN LOWER(COALESCE(metode_pembayaran, '')) LIKE '%tunai%'
+              OR LOWER(COALESCE(metode_pembayaran, '')) LIKE '%cash%'
+            THEN 1
+          END
+        ) AS tunaiTransaksi
 
       FROM pemesanan
 
-      WHERE LOWER(status) = 'selesai'
+      WHERE LOWER(COALESCE(status, '')) = 'selesai'
       AND ${filterTanggal}
     `);
 
     const laporan = rows[0];
 
+    const totalTransaksi = Number(laporan.totalTransaksi) || 0;
+    const totalOmzet = Number(laporan.totalOmzet) || 0;
+    const qrisOmzet = Number(laporan.qrisOmzet) || 0;
+    const tunaiOmzet = Number(laporan.tunaiOmzet) || 0;
+
     res.status(200).json({
       success: true,
       laporan: {
-        totalTransaksi: Number(laporan.totalTransaksi),
-        totalOmzet: Number(laporan.totalOmzet),
-        qrisOmzet: Number(laporan.qrisOmzet),
-        tunaiOmzet: Number(laporan.tunaiOmzet),
+        totalTransaksi,
+        totalOmzet,
+        qrisOmzet,
+        tunaiOmzet,
+
+        qrisTransaksi: Number(laporan.qrisTransaksi) || 0,
+        tunaiTransaksi: Number(laporan.tunaiTransaksi) || 0,
+
         rataRataTransaksi:
-          laporan.totalTransaksi > 0
-            ? Number(laporan.totalOmzet) /
-              Number(laporan.totalTransaksi)
+          totalTransaksi > 0
+            ? totalOmzet / totalTransaksi
             : 0,
       },
     });
@@ -101,7 +117,7 @@ export const getLaporanOmzet = async (
 
     res.status(500).json({
       success: false,
-      message: 'Gagal mengambil laporan omzet',
+      message: 'Gagal mengambil data laporan omzet.',
       error: error.message,
     });
   }

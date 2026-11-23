@@ -1,14 +1,26 @@
+
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 
 import {
   findUserByEmail,
-  updateUserPassword
+  updateUserPassword,
+  findUserById,
+  isEmailUsedByAnotherUser,
+  updateUserProfile
 } from '../models/authModel';
 
+import { AuthRequest } from '../middlewares/authMiddleware';
+
+import {
+  catatAktivitas,
+  ambilInfoAktivitas
+} from '../utils/activityLogger';
+
+// ==========================================
 // REGISTRASI PUBLIK DINONAKTIFKAN
-// Akun admin hanya boleh dibuat melalui proses tepercaya.
+// ==========================================
 export const register = async (
   _req: Request,
   res: Response
@@ -19,15 +31,17 @@ export const register = async (
   });
 };
 
+// ==========================================
 // LOGIN ADMIN
+// ==========================================
 export const login = async (
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
-  const { email, password } = req.body;
+  const body = req.body ?? {};
+  const { email, password } = body;
 
-  // 1. Validasi input wajib
   if (
     typeof email !== 'string' ||
     typeof password !== 'string' ||
@@ -43,7 +57,6 @@ export const login = async (
 
   const cleanEmail = email.trim().toLowerCase();
 
-  // 2. Validasi format email Gmail
   const gmailPattern = /^[a-zA-Z0-9._%+-]+@gmail\.com$/;
 
   if (!gmailPattern.test(cleanEmail)) {
@@ -55,10 +68,20 @@ export const login = async (
   }
 
   try {
-    // 3. Cari akun berdasarkan email
+    const info = ambilInfoAktivitas(req);
+
     const user = await findUserByEmail(cleanEmail);
 
     if (!user) {
+      await catatAktivitas({
+        user_id: null,
+        user_email: cleanEmail,
+        aktivitas: 'LOGIN_GAGAL',
+        deskripsi: 'Percobaan login gagal karena email tidak ditemukan.',
+        modul: 'Autentikasi',
+        ...info
+      });
+
       res.status(401).json({
         success: false,
         message: 'Email atau password salah.'
@@ -66,8 +89,16 @@ export const login = async (
       return;
     }
 
-    // 4. Pastikan akun memiliki role admin
     if (user.role !== 'admin') {
+      await catatAktivitas({
+        user_id: user.id,
+        user_email: user.email,
+        aktivitas: 'LOGIN_DITOLAK',
+        deskripsi: 'Login ditolak karena akun bukan admin.',
+        modul: 'Autentikasi',
+        ...info
+      });
+
       res.status(403).json({
         success: false,
         message: 'Akses ditolak. Akun ini bukan admin.'
@@ -75,23 +106,20 @@ export const login = async (
       return;
     }
 
-    // 5. Periksa password
     const storedPassword = user.password;
 
-    // Mengenali hash bcrypt
-    const isBcryptHash = /^\$2[aby]\$\d{2}\$/.test(storedPassword);
+    const isBcryptHash =
+      /^\$2[aby]\$\d{2}\$/.test(storedPassword);
 
     let passwordMatches = false;
 
     if (isBcryptHash) {
-      // Password tersimpan dalam bentuk hash bcrypt
       passwordMatches = await bcrypt.compare(
         password,
         storedPassword
       );
     } else {
-      // Kompatibilitas sementara untuk akun lama
-      // yang password-nya masih tersimpan sebagai teks biasa.
+      // Kompatibilitas sementara untuk password akun lama.
       passwordMatches = password === storedPassword;
 
       if (passwordMatches) {
@@ -101,6 +129,15 @@ export const login = async (
     }
 
     if (!passwordMatches) {
+      await catatAktivitas({
+        user_id: user.id,
+        user_email: user.email,
+        aktivitas: 'LOGIN_GAGAL',
+        deskripsi: 'Percobaan login gagal karena password salah.',
+        modul: 'Autentikasi',
+        ...info
+      });
+
       res.status(401).json({
         success: false,
         message: 'Email atau password salah.'
@@ -108,14 +145,12 @@ export const login = async (
       return;
     }
 
-    // 6. Pastikan secret JWT tersedia
     const jwtSecret = process.env.JWT_SECRET;
 
     if (!jwtSecret) {
       throw new Error('JWT_SECRET belum diatur pada file .env');
     }
 
-    // 7. Buat JWT Token
     const token = jwt.sign(
       {
         id: user.id,
@@ -128,7 +163,15 @@ export const login = async (
       }
     );
 
-    // 8. Kirim respons login
+    await catatAktivitas({
+      user_id: user.id,
+      user_email: user.email,
+      aktivitas: 'LOGIN_BERHASIL',
+      deskripsi: 'Admin berhasil login ke website REDScan.',
+      modul: 'Autentikasi',
+      ...info
+    });
+
     res.status(200).json({
       success: true,
       message: 'Login admin berhasil.',
@@ -139,6 +182,111 @@ export const login = async (
         email: user.email,
         role: user.role
       }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==========================================
+// UPDATE PROFIL ADMIN
+// ==========================================
+export const updateProfile = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+
+    const body = req.body ?? {};
+    const { name, email } = body;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        message: 'Silakan login terlebih dahulu.'
+      });
+      return;
+    }
+
+    if (
+      typeof name !== 'string' ||
+      typeof email !== 'string' ||
+      !name.trim() ||
+      !email.trim()
+    ) {
+      res.status(400).json({
+        success: false,
+        message: 'Nama lengkap dan email wajib diisi.'
+      });
+      return;
+    }
+
+    const cleanName = name.trim();
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (cleanName.length < 2 || cleanName.length > 100) {
+      res.status(400).json({
+        success: false,
+        message: 'Nama harus terdiri dari 2 sampai 100 karakter.'
+      });
+      return;
+    }
+
+    const gmailPattern = /^[a-zA-Z0-9._%+-]+@gmail\.com$/;
+
+    if (!gmailPattern.test(cleanEmail)) {
+      res.status(400).json({
+        success: false,
+        message: 'Email harus menggunakan format @gmail.com.'
+      });
+      return;
+    }
+
+    const emailUsed = await isEmailUsedByAnotherUser(
+      cleanEmail,
+      userId
+    );
+
+    if (emailUsed) {
+      res.status(409).json({
+        success: false,
+        message: 'Email sudah digunakan oleh akun lain.'
+      });
+      return;
+    }
+
+    await updateUserProfile(
+      userId,
+      cleanName,
+      cleanEmail
+    );
+
+    const updatedUser = await findUserById(userId);
+
+    if (!updatedUser) {
+      res.status(404).json({
+        success: false,
+        message: 'Data admin tidak ditemukan.'
+      });
+      return;
+    }
+
+    await catatAktivitas({
+      user_id: userId,
+      user_email: updatedUser.email,
+      aktivitas: 'UPDATE_PROFIL',
+      deskripsi: 'Admin memperbarui informasi profil.',
+      modul: 'Profil',
+      referensi_id: String(userId),
+      ...ambilInfoAktivitas(req)
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Profil berhasil diperbarui.',
+      user: updatedUser
     });
   } catch (error) {
     next(error);

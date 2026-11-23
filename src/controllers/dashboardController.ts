@@ -1,3 +1,4 @@
+
 import { Request, Response } from 'express';
 import db from '../config/db';
 
@@ -6,34 +7,42 @@ export const getDashboardStats = async (
   res: Response
 ): Promise<void> => {
   try {
-    // Menghitung jumlah transaksi dan total omzet
+    // 1. Total transaksi dan omzet yang sudah selesai
     const [totalRes]: any = await db.query(`
       SELECT
         COUNT(*) AS totalTransaksi,
         IFNULL(SUM(total_harga), 0) AS totalOmzet
       FROM pemesanan
+      WHERE LOWER(status) = 'selesai'
     `);
 
-    // Menghitung omzet dari pembayaran QRIS
+    // 2. Omzet QRIS yang sudah selesai
     const [qrisRes]: any = await db.query(`
-      SELECT IFNULL(SUM(total_harga), 0) AS qrisOmzet
+      SELECT
+        IFNULL(SUM(total_harga), 0) AS qrisOmzet
       FROM pemesanan
-      WHERE LOWER(metode_pembayaran) = 'qris'
+      WHERE LOWER(status) = 'selesai'
+        AND LOWER(metode_pembayaran) LIKE '%qris%'
     `);
 
-    // Menghitung omzet dari pembayaran tunai
+    // 3. Omzet tunai yang sudah selesai
     const [tunaiRes]: any = await db.query(`
-      SELECT IFNULL(SUM(total_harga), 0) AS tunaiOmzet
+      SELECT
+        IFNULL(SUM(total_harga), 0) AS tunaiOmzet
       FROM pemesanan
-      WHERE LOWER(metode_pembayaran) = 'tunai'
+      WHERE LOWER(status) = 'selesai'
+        AND LOWER(metode_pembayaran) LIKE '%tunai%'
     `);
 
-    // Menghitung pesanan yang masih antre
+    // 4. Pesanan yang sedang diproses
     const [pesananDiprosesRows]: any = await db.query(`
-    SELECT COUNT(*) AS pesananDiproses
-    FROM pemesanan
-    WHERE LOWER(status) = 'diproses'
-  `);
+      SELECT
+        COUNT(*) AS pesananDiproses
+      FROM pemesanan
+      WHERE LOWER(status) = 'diproses'
+    `);
+
+    // 5. Kirim data ke frontend
     res.status(200).json({
       success: true,
       stats: {
@@ -41,15 +50,21 @@ export const getDashboardStats = async (
         totalOmzet: Number(totalRes[0].totalOmzet),
         qrisOmzet: Number(qrisRes[0].qrisOmzet),
         tunaiOmzet: Number(tunaiRes[0].tunaiOmzet),
-        pesananDiproses: pesananDiprosesRows[0].pesananDiproses,
-      }
+        pesananDiproses: Number(
+          pesananDiprosesRows[0].pesananDiproses
+        ),
+      },
     });
+
   } catch (error: any) {
-    console.error('Gagal mengambil statistik dashboard:', error);
+    console.error(
+      'Gagal mengambil statistik Dashboard:',
+      error
+    );
 
     res.status(500).json({
       success: false,
-      message: 'Gagal mengambil statistik dashboard.'
+      message: 'Gagal mengambil statistik Dashboard.',
     });
   }
 };
