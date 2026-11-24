@@ -5,6 +5,7 @@ import app from './app';
 import db from './config/db';
 
 const PORT = Number(process.env.PORT || 5000);
+const HOST = '0.0.0.0';
 
 const startServer = async (): Promise<void> => {
   let connection;
@@ -16,7 +17,7 @@ const startServer = async (): Promise<void> => {
 
     connection = await db.getConnection();
 
-    console.log('Database MySQL Laragon berhasil terhubung!');
+    console.log('Koneksi database MySQL berhasil!');
 
     connection.release();
     connection = undefined;
@@ -40,15 +41,8 @@ const startServer = async (): Promise<void> => {
     console.log('');
     console.log('========== PEMERIKSAAN MIDTRANS ==========');
 
-    console.log(
-      'Server Key terbaca:',
-      Boolean(serverKey)
-    );
-
-    console.log(
-      'Client Key terbaca:',
-      Boolean(clientKey)
-    );
+    console.log('Server Key terbaca:', Boolean(serverKey));
+    console.log('Client Key terbaca:', Boolean(clientKey));
 
     console.log(
       'Awalan Server Key benar:',
@@ -60,20 +54,9 @@ const startServer = async (): Promise<void> => {
       clientKey.startsWith('SB-Mid-client-')
     );
 
-    console.log(
-      'Panjang Server Key:',
-      serverKey.length
-    );
-
-    console.log(
-      'Panjang Client Key:',
-      clientKey.length
-    );
-
-    console.log(
-      'Mode Production:',
-      production
-    );
+    console.log('Panjang Server Key:', serverKey.length);
+    console.log('Panjang Client Key:', clientKey.length);
+    console.log('Mode Production:', production);
 
     console.log(
       'Mode Sandbox aktif:',
@@ -94,12 +77,12 @@ const startServer = async (): Promise<void> => {
     console.log('');
 
     // =====================================
-    // 3. PERIKSA KONFIGURASI DASAR
+    // 3. VALIDASI KONFIGURASI
     // =====================================
 
     if (!serverKey || !clientKey) {
       throw new Error(
-        'Server Key atau Client Key Midtrans belum terbaca. Periksa file .env.'
+        'Server Key atau Client Key Midtrans belum terbaca.'
       );
     }
 
@@ -110,29 +93,26 @@ const startServer = async (): Promise<void> => {
     }
 
     if (!serverKey.startsWith('SB-Mid-server-')) {
-      throw new Error(
-        'Server Key bukan format Sandbox.'
-      );
+      throw new Error('Server Key bukan format Sandbox.');
     }
 
     if (!clientKey.startsWith('SB-Mid-client-')) {
-      throw new Error(
-        'Client Key bukan format Sandbox.'
-      );
+      throw new Error('Client Key bukan format Sandbox.');
     }
 
     // =====================================
-    // 4. JALANKAN SERVER
+    // 4. JALANKAN SERVER UNTUK RAILWAY
     // =====================================
 
-    app.listen(PORT, () => {
-      console.log(
-        `REDScan API berjalan di http://localhost:${PORT}`
-      );
-
-      console.log(
-        'Konfigurasi dasar Midtrans Sandbox berhasil diperiksa.'
-      );
+    app.listen(PORT, HOST, () => {
+      console.log('==========================================');
+      console.log('REDScan API berhasil dijalankan!');
+      console.log(`Host   : ${HOST}`);
+      console.log(`Port   : ${PORT}`);
+      console.log('Environment:', process.env.NODE_ENV || 'development');
+      console.log('Midtrans: Sandbox');
+      console.log('Konfigurasi server berhasil diperiksa.');
+      console.log('==========================================');
     });
 
   } catch (error) {
